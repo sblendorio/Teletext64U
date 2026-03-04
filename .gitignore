@@ -1,0 +1,18 @@
+# Ignore everything
+*
+
+!.gitignore
+!README.md
+
+# Allowed to publish
+!/docs/
+!/docs/*
+
+!/PetsciiProxy/
+/PetsciiProxy/*
+!/PetsciiProxy/*.py
+
+!/Teletext64U/
+!/Teletext64U/target/
+/Teletext64U/target/*
+!/Teletext64U/target/*.d64
