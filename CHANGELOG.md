@@ -1,5 +1,14 @@
 # **Teletext64U** changelog
 
+## [1.0.2] - 2026-03-07
+
+### Added
+Users reporting a black teletext screen at startup now have more information about what could be the problem:
+- _Ultimate Command Interface_ detection added at startup; when not detected, the program instructs the user how to enable it.
+- PetsciiProxy detection at startup.
+- RunMeFirst.cfg. This config file enables the Command Interface and sets the CPU speed to 40Mhz. It's in the Teletext64U/target folder next to the .d64 image. 
+
+
 ## [1.0.1] - 2026-03-05
 
 ### Fixed
