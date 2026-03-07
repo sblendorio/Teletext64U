@@ -18,3 +18,4 @@
 /Teletext64U/target/*
 !/Teletext64U/target/*.d64
 !/Teletext64U/target/RunMeFirst.cfg
+!/Teletext64U/target/teletext.vpl
