@@ -20,6 +20,7 @@ Although the C64U has excellent networking capabilities, it unfortunately is res
 - Fast text support via function keys (resembling the red, green, yellow and cyan quick access keys from the TV-remote)
 - Two custom hand crafted 6x6 pixel character sets (thin & bold) - this leaves toom for 1 pixel row of background color at the top and bottom of each character. This leads to a much better overall looking teletext screen imo.
 - Switch between the thin and bold fonts on the fly within the program
+- If a requested page is not available online, it will show an older previous saved version of the page, if available. Handy for archival purposes.
 
 
 ## Tools used for this project
