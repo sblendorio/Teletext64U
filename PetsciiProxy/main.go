@@ -262,6 +262,7 @@ func nosttGetTeletexPage(pageNr string) {
 	}
 
 	cleanNr := strings.Split(pageNr, "-")[0]
+	cleanNrInt, _ := strconv.Atoi(cleanNr)
 
 	headerText := fmt.Sprintf("\x02NOS-TT  %s\x03%s  %s", cleanNr, dutchDate, headerTime)
 	newPreLine := fmt.Sprintf("<pre>%40s", headerText)
@@ -286,6 +287,22 @@ func nosttGetTeletexPage(pageNr string) {
 	}
 
 	finalBytes := []byte(modifiedContent)
+
+	// Funny hack. These pages used to have a double heigth row on top. At some point NOS-TT decided
+	// to make it normal height and the row below became black. The code restores double height!
+	if (cleanNrInt > 702 && cleanNrInt < 733) || (cleanNrInt > 750 && cleanNrInt < 763) {
+		// fix 2nd row: find 1st 0x20 (space) and replace with double height control code
+		for x := 0; x < 39; x++ {
+			if finalBytes[startIndex+5+2*40+x] == 0x20 {
+				finalBytes[startIndex+5+2*40+x] = 0x0D
+				break
+			}
+		}
+		// fix 3rd row
+		finalBytes[startIndex+5+3*40+0] = 0x02 // Green
+		finalBytes[startIndex+5+3*40+1] = 0x1D // New Background Color
+	}
+
 	filePath := filepath.Join(DirNOS, pageNr)
 
 	err = os.WriteFile(filePath, finalBytes, 0644)
