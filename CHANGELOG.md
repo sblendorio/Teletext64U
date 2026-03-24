@@ -1,5 +1,14 @@
 # **Teletext64U** changelog
 
+## [1.2.3] - 2026-03-24
+
+### Added
+- *Flashing text* support added in Teletext64U. The green conceal indicator in the top row will also blink on and off now. 
+
+### Notes on flashing and blinking text
+On TEEFAX page 532/8 is a really cool subpage! Go check it out, you will find a really great and familiar recreated boot screen of a certain 8-bit computer. Some more (sub)pages to check out nice flashing effects (all TEEFAX): 411/2, 411/17, 411/20, 501/2, 510/4, 510/7, 510/23, 551/4, 794/3.
+
+
 ## [1.2.2] - 2026-03-23
 
 ### Added

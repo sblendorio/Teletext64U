@@ -807,6 +807,7 @@ func teefaxGetTeletexPage(pageNr string) {
 }
 
 var subpage byte
+var fullDoubleHeightRow bool
 
 func parseTTIRows(r io.Reader, pageStr string, subpageStr string, isCEEFAX bool) [][]byte {
 	subpageFound := false
@@ -874,6 +875,11 @@ func parseTTIRows(r io.Reader, pageStr string, subpageStr string, isCEEFAX bool)
 				if escFound {
 					escFound = false
 					c -= 0x40
+				}
+				if col == 3 && c == 0x0D && lineNumber < 24 {
+					// we found a full row double height; copy color and new background to next line
+					rows[lineNumber+1][0] = rows[lineNumber][0]
+					rows[lineNumber+1][1] = rows[lineNumber][1]
 				}
 				//fmt.Printf("row:%v;col:%v\n", lineNumber, col)
 				if col < 40 {
