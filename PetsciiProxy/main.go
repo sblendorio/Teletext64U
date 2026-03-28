@@ -18,6 +18,7 @@ Supported teletext services:
 - ARD-TEXT (German: 'Der Teletext im Ersten')
 - NMS CEEFAX (British teletext, closed by the BBC in 2012 and recreated by Nathan Dane)
 - TEEFAX (British teletext, a community based service with a huge collection of fine teletext art, historical pages and other great stuff)
+- YLE Teksti-TV (Finnish / Suomi)
 
 Next up:
 - other services which can be parsed
@@ -50,6 +51,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/xml"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +72,7 @@ const (
 	DirARD    = "ARD-TEXT"
 	DirCEEFAX = "CEEFAX"
 	DirTEEFAX = "TEEFAX"
+	DirTEKSTI = "TEKSTI-TV"
 )
 
 // Each service has its own handler
@@ -77,6 +81,7 @@ var handlers = map[string]http.HandlerFunc{
 	DirARD:    ardtextHandler,
 	DirCEEFAX: ceefaxHandler,
 	DirTEEFAX: teefaxHandler,
+	DirTEKSTI: tekstiHandler,
 }
 
 // Teletext control codes (range 0x00..0x1F); Alpha is a regular character; a mosaic is a graphics character
@@ -129,6 +134,66 @@ var ardColorMap = map[string]byte{
 	"w":  7, // white
 }
 
+// TEKSTI-TV: XML based
+
+// gets filled with command line parameter
+var tekstiAPIkey string = ""
+
+// https://developer.yle.fi/en/api/index.html
+// Note: not every control code is listed here
+var controlMap = map[string]byte{
+	"Black":    TCC_ALPHA_BLACK,
+	"Red":      TCC_ALPHA_RED,
+	"Green":    TCC_ALPHA_GREEN,
+	"Yellow":   TCC_ALPHA_YELLOW,
+	"Blue":     TCC_ALPHA_BLUE,
+	"Magenta":  TCC_ALPHA_MAGENTA,
+	"Cyan":     TCC_ALPHA_CYAN,
+	"White":    TCC_ALPHA_WHITE,
+	"Flash":    TCC_FLASH,
+	"Steady":   TCC_STEADY,
+	"GBlack":   TCC_MOSAIC_BLACK,
+	"GRed":     TCC_MOSAIC_RED,
+	"GGreen":   TCC_MOSAIC_GREEN,
+	"GYellow":  TCC_MOSAIC_YELLOW,
+	"GBlue":    TCC_MOSAIC_BLUE,
+	"GMagenta": TCC_MOSAIC_MAGENTA,
+	"GCyan":    TCC_MOSAIC_CYAN,
+	"GWhite":   TCC_MOSAIC_WHITE,
+	"CG":       TCC_CONTINUOUS_MOSAICS,
+	"SG":       TCC_SEPERATED_MOSAICS,
+	"NB":       TCC_NEW_BACKGROUND,
+	"Hold":     TCC_HOLD_MOSAICS,
+	"NH":       TCC_NORMAL_HEIGHT,
+	"DH":       TCC_DOUBLE_HEIGHT,
+	"BB":       TCC_BLACK_BACKGROUND,
+	"Conceal":  TCC_CONCEAL,
+	"SB":       TCC_STARTBOX,
+}
+
+var tagRegex = regexp.MustCompile(`\{([A-Za-z0-9]+)\}`)
+
+type TeletextLine struct {
+	Number int    `xml:"number,attr"`
+	Value  string `xml:",chardata"`
+}
+
+type Content struct {
+	Type  string         `xml:"type,attr"`
+	Lines []TeletextLine `xml:"line"`
+}
+
+type Subpage struct {
+	Number   int       `xml:"number,attr"`
+	Contents []Content `xml:"content"`
+}
+
+type TeletextPage struct {
+	Subpages []Subpage `xml:"subpage"`
+}
+
+// END TEKSTI-TV
+
 // html acccent marks with corresponding teletext values and other entities (far from complete, but all we need for now)
 var entityMap = map[string]byte{
 	"nbsp":   0x20,
@@ -155,19 +220,32 @@ var entityMap = map[string]byte{
 var mosaicRe = regexp.MustCompile(`g1[a-z]([0-9a-fA-F]{2})\.gif`)
 
 func main() {
-	var port int = 8080 // default listening port
 	var err error
 
-	// User can override default port with a command line parameter
-	if len(os.Args) > 1 {
-		port, err = strconv.Atoi(os.Args[1])
-		if err != nil {
-			fmt.Println("Error: The argument provided is not a valid. Provide a port number.")
-			return
-		}
-		if port < 0 || port > 65535 {
-			fmt.Println("Error: Invalid port number (shoud be in range 0-65535)")
-			return
+	// Command line parameter flags: name, default value, description
+	portPtr := flag.Int("p", 8080, "Listening port number (0-65535)")
+	keyPtr := flag.String("k", "", `Yle Teksti-TV API key string. Mandatory if you want to use the Finnish teletext service. 
+
+For the Finnish Yle Teksti-TV service to work you have to use your personal API-key. 
+If you do not have one, you can request one here: https://developer.yle.fi/en/index.html`)
+
+	flag.Parse()
+	port := *portPtr
+	tekstiAPIkey = *keyPtr
+
+	if port < 0 || port > 65535 {
+		fmt.Println("Error: Invalid port number (should be in range 0-65535)")
+		os.Exit(1)
+	}
+
+	if tekstiAPIkey == "" {
+		fmt.Printf(">> No Yle Teksti-TV API key provided. Select Teksti-TV in Teletext64U for more information.\n")
+	} else {
+		if !strings.Contains(tekstiAPIkey, "app_id") || !strings.Contains(tekstiAPIkey, "app_key") {
+			fmt.Println("The Teksti-TV API key should contain an app_id and an app_key.")
+			fmt.Printf("\r\nStart PetsciiProxy like the example below. Use quotes around the whole API key!\r\n")
+			fmt.Printf("petsciiproxy-mac-silicon -k \"app_id=123a456b789c0&app_key=0abc1def2\"\r\n")
+			os.Exit(1)
 		}
 	}
 
@@ -352,7 +430,7 @@ func ardtextGetTeletexPage(pageNr string) {
 		return
 	}
 
-	// Note: the ftl - fast text links are fixed for now; it could be made dynamic in a future release
+	// Note: the ftl - fastext links are fixed for now; it could be made dynamic in a future release
 	// Startseite (100), Sport (200), Wetter (171) and Börse (711)
 	// aka: start page, sport, weather, stocks
 	var output []byte
@@ -521,7 +599,7 @@ func parseARDRows(r io.Reader, correctFirstRows bool) [][]byte {
 		fmt.Sscanf(m[1], "%x", &v)
 		mosaic := byte(v + 0x80)
 		writeChar(mosaic)
-		// correct color control code offset if neededd
+		// correct color control code offset if needed
 		if colorPos != 0xFF {
 			row[colorPos] += 0x10
 			colorPos = 0xFF
@@ -589,7 +667,7 @@ func parseARDRows(r io.Reader, correctFirstRows bool) [][]byte {
 	}
 
 	/*
-		Added an extra FastTextLinks row to the teletext page.
+		Added an extra FastextLinks row to the teletext page.
 		Note: ARD-TEXT doesn't have this in their TV-station nor on the internet service.
 		What I did (for now): provide some fixed FTL links. I think it's better than nothing.
 		Of course, this could be made more fancy with dynamic info from the HTML page in the future.
@@ -824,7 +902,6 @@ func parseTTIRows(r io.Reader, pageStr string, subpageStr string, isCEEFAX bool)
 	}
 
 	data, _ := io.ReadAll(r)
-	//	lines := bytes.Split(data, []byte("\r\n"))
 	// On TEEFAX there are pages that have mixed \r\n and just \n; fixed
 	normalizedData := bytes.ReplaceAll(data, []byte("\r"), []byte(""))
 	lines := bytes.Split(normalizedData, []byte("\n"))
@@ -842,7 +919,6 @@ func parseTTIRows(r io.Reader, pageStr string, subpageStr string, isCEEFAX bool)
 		*/
 		if bytes.HasPrefix(parts[0], []byte("PN")) {
 			if subpageFound {
-				// Stop processing data if we encounter the next subpage
 				break
 			}
 			// format XXXYY; subpage is last two YY digits
@@ -877,7 +953,7 @@ func parseTTIRows(r io.Reader, pageStr string, subpageStr string, isCEEFAX bool)
 					c -= 0x40
 				}
 				if col == 3 && c == 0x0D && lineNumber < 24 {
-					// we found a full row double height; copy color and new background to next line
+					// we found a full row double height; copy color and new background to next line (apply to Teksti-TV too?)
 					rows[lineNumber+1][0] = rows[lineNumber][0]
 					rows[lineNumber+1][1] = rows[lineNumber][1]
 				}
@@ -893,7 +969,7 @@ func parseTTIRows(r io.Reader, pageStr string, subpageStr string, isCEEFAX bool)
 					// We need to modify the header from something like this: ECIMS^BCeefax Worl^F102^A1773576080
 					// To what is displayed on a TV (and https://nmsceefax.co.uk/): CEEFAX 1 100 Sun 15 Mar 13:17/09
 					// Large number on the right is a unix time stamp
-					copy(rows[0][7:], fmt.Sprintf("\x07CEEFAX 1 %s ", pageStr)) // Text is white (0x07)
+					copy(rows[0][7:], fmt.Sprintf("\x07CEEFAX 1 %s ", pageStr))
 					unixtime := bytes.Split(rows[0], []byte{0x01})
 					timestampStr := string(unixtime[1])
 					unixInt64, err := strconv.ParseInt(timestampStr, 10, 64)
@@ -906,18 +982,16 @@ func parseTTIRows(r io.Reader, pageStr string, subpageStr string, isCEEFAX bool)
 			}
 		}
 
-		// process fast text line if we encounter a FL
+		// process fastext line if we encounter a FL
 		if subpageFound && bytes.HasPrefix(parts[0], []byte("FL")) {
 			ftl = bytes.Split(line, []byte(","))
 			ftl = ftl[1:5] // we need ftl 1, 2, 3 and 4. Note ftl[1:5] in Go is equal to math notation [1:5)
-
-			//break
 		}
 	}
 	// TEEFAX: always force the default header row with current date/time
 	if !isCEEFAX {
 		rows[0] = bytes.Repeat([]byte{0x20}, 40)
-		copy(rows[0][7:], fmt.Sprintf("\x07TEEFAX 1 %s ", pageStr)) // Text is white (0x07)
+		copy(rows[0][7:], fmt.Sprintf("\x07TEEFAX 1 %s ", pageStr))
 		timeStr := formatTime(0, false)
 		copy(rows[0][21:], timeStr)
 	}
@@ -1015,6 +1089,264 @@ func getTeefaxURL(pageID string) (string, error) {
 				}
 			}
 		}
+	}
+}
+
+// --- YLE TEKSTI-TV  ---
+
+func tekstiHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	pageName := strings.TrimPrefix(id, "/")
+	logPageRequest(DirTEKSTI, pageName)
+	tekstiGetTeletexPage(pageName)
+
+	path := filepath.Join(DirTEKSTI, pageName)
+	if _, err := os.Stat(path); err == nil {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			sendErrorMsg(w, 500, "Internal error reading file")
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=ISO-8859-1")
+		w.WriteHeader(200)
+		w.Write(content)
+	} else {
+		sendErrorMsg(w, 404, "Teletext page "+pageName+" not found.")
+	}
+}
+
+func tekstiGetTeletexPage(pageNr string) {
+	parts := strings.Split(pageNr, "-")
+	var rows [][]byte
+
+	if tekstiAPIkey == "" {
+		// show the user a teletext page with instructions how to obtain an API key
+		rows = make([][]byte, 24)
+		rows[0] = []byte{0x14, 0x1D, 0x17, 0x68, 0x20, 0x68, 0x68, 0x20, 0x70, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[1] = []byte{0x04, 0x1D, 0x17, 0x22, 0x64, 0x26, 0x6A, 0x6A, 0x2C, 0x25, 0x07, 0x54, 0x65, 0x6B, 0x73, 0x74, 0x69, 0x2D, 0x54, 0x56, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[2] = []byte{0x04, 0x1D, 0x17, 0x20, 0x2A, 0x20, 0x2A, 0x22, 0x2C, 0x21, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[3] = []byte{0x06, 0x1D, 0x20, 0x04, 0x79, 0x6C, 0x65, 0x2E, 0x66, 0x69, 0x2F, 0x74, 0x65, 0x6B, 0x73, 0x74, 0x69, 0x74, 0x76, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[4] = []byte{0x14, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23, 0x23}
+		rows[5] = []byte{0x07, 0x20, 0x46, 0x6F, 0x72, 0x20, 0x74, 0x68, 0x65, 0x20, 0x46, 0x69, 0x6E, 0x6E, 0x69, 0x73, 0x68, 0x20, 0x59, 0x6C, 0x65, 0x20, 0x54, 0x65, 0x6B, 0x73, 0x74, 0x69, 0x2D, 0x54, 0x56, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[6] = []byte{0x07, 0x20, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x20, 0x74, 0x6F, 0x20, 0x77, 0x6F, 0x72, 0x6B, 0x2C, 0x20, 0x79, 0x6F, 0x75, 0x20, 0x68, 0x61, 0x76, 0x65, 0x20, 0x74, 0x6F, 0x20, 0x75, 0x73, 0x65, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[7] = []byte{0x07, 0x20, 0x79, 0x6F, 0x75, 0x72, 0x20, 0x70, 0x65, 0x72, 0x73, 0x6F, 0x6E, 0x61, 0x6C, 0x20, 0x41, 0x50, 0x49, 0x2D, 0x6B, 0x65, 0x79, 0x2E, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[8] = []byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[9] = []byte{0x07, 0x20, 0x49, 0x66, 0x20, 0x79, 0x6F, 0x75, 0x20, 0x64, 0x6F, 0x20, 0x6E, 0x6F, 0x74, 0x20, 0x68, 0x61, 0x76, 0x65, 0x20, 0x6F, 0x6E, 0x65, 0x2C, 0x20, 0x79, 0x6F, 0x75, 0x20, 0x63, 0x61, 0x6E, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[10] = []byte{0x07, 0x20, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x20, 0x6F, 0x6E, 0x65, 0x20, 0x68, 0x65, 0x72, 0x65, 0x3A, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[11] = []byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[12] = []byte{0x06, 0x0D, 0x64, 0x65, 0x76, 0x65, 0x6C, 0x6F, 0x70, 0x65, 0x72, 0x2E, 0x79, 0x6C, 0x65, 0x2E, 0x66, 0x69, 0x2F, 0x65, 0x6E, 0x2F, 0x69, 0x6E, 0x64, 0x65, 0x78, 0x2E, 0x68, 0x74, 0x6D, 0x6C, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[13] = []byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[14] = []byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[15] = []byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[16] = []byte{0x12, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70}
+		rows[17] = []byte{0x02, 0x1D, 0x04, 0x53, 0x74, 0x61, 0x72, 0x74, 0x20, 0x50, 0x65, 0x74, 0x73, 0x63, 0x69, 0x69, 0x50, 0x72, 0x6F, 0x78, 0x79, 0x20, 0x77, 0x69, 0x74, 0x68, 0x20, 0x74, 0x68, 0x69, 0x73, 0x20, 0x63, 0x6F, 0x6D, 0x6D, 0x61, 0x6E, 0x64, 0x20}
+		rows[18] = []byte{0x02, 0x1D, 0x04, 0x6C, 0x69, 0x6E, 0x65, 0x20, 0x70, 0x61, 0x72, 0x61, 0x6D, 0x65, 0x74, 0x65, 0x72, 0x3A, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[19] = []byte{0x02, 0x1D, 0x04, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[20] = []byte{0x02, 0x1D, 0x04, 0x70, 0x65, 0x74, 0x73, 0x63, 0x69, 0x69, 0x70, 0x72, 0x6F, 0x78, 0x79, 0x20, 0x2D, 0x6B, 0x20, 0x22, 0x79, 0x6F, 0x75, 0x72, 0x20, 0x41, 0x50, 0x49, 0x20, 0x6B, 0x65, 0x79, 0x22, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[21] = []byte{0x02, 0x1D, 0x07, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		rows[22] = []byte{0x04, 0x1D, 0x07, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x54, 0x65, 0x6C, 0x65, 0x74, 0x65, 0x78, 0x74, 0x36, 0x34, 0x55, 0x20}
+		rows[23] = []byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20}
+		logFetchingPage("Yle Teksti-TV info screen")
+	} else {
+		url := fmt.Sprintf("https://external.api.yle.fi/v1/teletext/pages/%s.xml?%s", parts[0], tekstiAPIkey)
+		logFetchingPage(url)
+		resp, err := http.Get(url)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			fmt.Println("HTTP Error: Could not retrieve page", pageNr, "Status:", resp.StatusCode)
+			return
+		}
+
+		if strings.HasPrefix(parts[1], "0") {
+			parts[1] = "1"
+		}
+
+		rows, err = parseTEKSTIRows(resp.Body, parts[1]) // parts[1] = subpagenumber
+		if err != nil {
+			fmt.Println("xml.Unmarshal error")
+			return
+		}
+	}
+
+	var output []byte
+	/*
+		output = append(output, []byte(fmt.Sprintf(
+				"pn=p_\npn=n_\nftl=%v-0\nftl=%v-0\nftl=%v-0\nftl=%v-0\n<pre>",
+				string(ftl[0]), string(ftl[1]), string(ftl[2]), string(ftl[3])))...)
+	*/
+	output = append(output, []byte(fmt.Sprintf(
+		"pn=p_\npn=n_\nftl=%v-0\nftl=%v-0\nftl=%v-0\nftl=%v-0\n<pre>",
+		"100", "200", "300", "400"))...)
+
+	headerRow := bytes.Repeat([]byte{0x20}, 40)
+	now := time.Now()
+	copy(headerRow[7:], fmt.Sprintf("\x07%s YLE TEKSTI-TV %02d.%02d.%s", parts[0], now.Day(), 3, now.Format("15:04:05")))
+	output = append(output, headerRow...)
+
+	for _, r := range rows {
+		output = append(output, r...)
+	}
+
+	output = append(output, []byte("</pre>")...)
+	os.WriteFile(filepath.Join(DirTEKSTI, pageNr), output, 0644)
+}
+
+func parseTEKSTIRows(body io.ReadCloser, subpageStr string) ([][]byte, error) {
+	defer body.Close()
+
+	// Initialize empty 24x40 grid with spaces (0x20)
+	pageBuffer := make([][]byte, 24)
+	for i := range pageBuffer {
+		line := make([]byte, 40)
+		for j := range line {
+			line[j] = 0x20
+		}
+		pageBuffer[i] = line
+	}
+
+	decoder := xml.NewDecoder(body)
+
+	// Track state during streaming
+	inTargetSubpage := false
+
+	for {
+		t, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		switch se := t.(type) {
+		case xml.StartElement:
+			if se.Name.Local == "subpage" {
+				// Check if this subpage matches the requested number
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "number" && attr.Value == subpageStr {
+						inTargetSubpage = true
+					}
+				}
+			}
+
+			// If inside correct subpage, look for <content type="all">
+			if inTargetSubpage && se.Name.Local == "content" {
+				isAllType := false
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "type" && attr.Value == "all" {
+						isAllType = true
+					}
+				}
+
+				if isAllType {
+					// We are inside the correct block, parse the lines
+					if err := decodeTekstiLinesIntoBuffer(decoder, pageBuffer); err != nil {
+						return nil, err
+					}
+					return pageBuffer, nil // Found and processed the target
+				}
+			}
+
+		case xml.EndElement:
+			if se.Name.Local == "subpage" {
+				inTargetSubpage = false
+			}
+		}
+	}
+	return pageBuffer, nil
+}
+
+// Helper to handle the internal line decoding
+func decodeTekstiLinesIntoBuffer(decoder *xml.Decoder, buffer [][]byte) error {
+	for {
+		t, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		switch se := t.(type) {
+		case xml.StartElement:
+			if se.Name.Local == "line" {
+				var lineNum int
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "number" {
+						fmt.Sscanf(attr.Value, "%d", &lineNum)
+					}
+				}
+				content, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				if cd, ok := content.(xml.CharData); ok {
+					if lineNum >= 1 && lineNum <= 24 {
+						buffer[lineNum-1] = processTekstiLine(string(cd))
+					}
+				}
+			}
+		case xml.EndElement:
+			if se.Name.Local == "content" {
+				return nil
+			}
+		}
+	}
+}
+
+func processTekstiLine(input string) []byte {
+	output := make([]byte, 0, 40)
+	runes := []rune(input)
+
+	for i := 0; i < len(runes); i++ {
+		if len(output) >= 40 {
+			break
+		}
+		if runes[i] == '{' {
+			end := -1
+			for j := i + 1; j < len(runes); j++ {
+				if runes[j] == '}' {
+					end = j
+					break
+				}
+			}
+			if end != -1 {
+				tagName := string(runes[i+1 : end])
+				if code, ok := controlMap[tagName]; ok {
+					output = append(output, code)
+					i = end // Move pointer to the '}'
+					continue
+				}
+			}
+		}
+		output = append(output, encodeTekstiChar(runes[i]))
+		//output = append(output, byte(runes[i]))
+	}
+	for len(output) < 40 {
+		output = append(output, 0x20)
+	}
+	return output[:40]
+}
+
+func encodeTekstiChar(r rune) byte {
+	switch r {
+	case 'Ä':
+		return 0x5B
+	case 'Ö':
+		return 0x5C
+	case 'Å':
+		return 0x5D
+	case 'ä':
+		return 0x7B
+	case 'ö':
+		return 0x7C
+	case 'å':
+		return 0x7D
+	default:
+		if r < 128 {
+			return byte(r)
+		}
+		return 0x20
 	}
 }
 

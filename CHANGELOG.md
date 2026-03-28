@@ -1,5 +1,25 @@
 # **Teletext64U** changelog
 
+## [1.3.0] - 2026-03-28
+
+### Added
+- YLE TEKSTI-TV (Finland)
+- Å and å character support for Swedish pages on Teksti-TV (pages 700-799).
+- Subpage range limitation (currently only NOS Teletekst). For example: if a page has 5 subpages, the cursor-down key will no longer allow requests beyond subpage number 5. Most teletext services provide subpage count information, so support for additional services is expected in the future.
+- PetsciiProxy commandline parameters: -p [listening port] -k [Yle Teksti-TV API-key]. Both parameters are optional. Use --help to display all available options.
+- petsciiproxy-linux-64bit executable (amd64 architecture).
+
+### Notes on Teksti-TV
+- I wasn't aware, but the Finnish language (Suomi) is very intriguing.
+- Check page 403 - the lighthouse has a real blinking light!
+- Also worth mentioning is index page 670, which lists major European soccer leagues by country.
+- They have some pages in English starting from page 190.
+
+### Note on Teletext64U
+- With the growing number of teletext services, pressing 'S' to switch stations all the time is not the best way. I will look into implementing a list for quick selection.
+
+
+
 ## [1.2.3] - 2026-03-24
 
 ### Added

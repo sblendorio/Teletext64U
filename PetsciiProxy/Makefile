@@ -5,3 +5,4 @@ build:
 	GOOS=darwin GOARCH=amd64 go build -o ./dist/${BINARY_NAME}-mac-intel main.go
 	GOOS=windows GOARCH=amd64 go build -o ./dist/${BINARY_NAME}-windows.exe main.go
 	GOOS=linux GOARCH=386 go build -o ./dist/${BINARY_NAME}-linux-386 main.go
+	GOOS=linux GOARCH=amd64 go build -o ./dist/${BINARY_NAME}-linux-64bit main.go

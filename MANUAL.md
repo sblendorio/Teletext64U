@@ -34,5 +34,5 @@ With this program you configure:
 |F7 | Fastext cyan |
 
 ## PetsciiProxy 
-This runs on your PC and acts as a bridge between the internet and your C64 Ultimate/Other Ultimate product running Teletext64U. The default listening port is 8080. You can change the port by starting PetsciiProxy with a command line parameter.
+This runs on your PC and acts as a bridge between the internet and your C64 Ultimate/Other Ultimate product running Teletext64U. The default listening port is 8080. You can change the port by starting PetsciiProxy with a command line parameter. Start the program with --help for all parameter options.
 

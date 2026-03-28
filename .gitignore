@@ -18,6 +18,7 @@
 !/PetsciiProxy/Makefile
 !/PetsciiProxy/dist/
 !/PetsciiProxy/dist/petsciiproxy-linux-386
+!/PetsciiProxy/dist/petsciiproxy-linux-64bit
 !/PetsciiProxy/dist/petsciiproxy-mac-silicon
 !/PetsciiProxy/dist/petsciiproxy-mac-intel
 !/PetsciiProxy/dist/petsciiproxy-windows.exe
